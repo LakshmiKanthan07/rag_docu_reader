@@ -1,1 +1,0 @@
-open to terminal and run python -m http.server 5500 and uvicorn main:app --reload
