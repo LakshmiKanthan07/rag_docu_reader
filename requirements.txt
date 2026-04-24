@@ -1,0 +1,25 @@
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Validation
+pydantic>=2.0.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# LangChain ecosystem
+langchain-ollama>=0.1.0
+langchain-community>=0.0.10
+langchain-text-splitters>=0.0.1
+langchain-core>=0.1.0
+
+# Vector store
+faiss-cpu>=1.7.4
+
+# Document loaders
+pypdf>=3.17.0
+python-docx>=0.8.11
+openpyxl>=3.0.0
+jq>=1.6.0
