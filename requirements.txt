@@ -9,6 +9,9 @@ pydantic>=2.0.0
 # Environment
 python-dotenv>=1.0.0
 
+# Rate limiting
+slowapi>=0.1.9
+
 # LangChain ecosystem
 langchain-ollama>=0.1.0
 langchain-community>=0.0.10
