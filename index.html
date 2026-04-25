@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="doctalk-api-base" content="http://127.0.0.1:8000">
+    <meta name="doctalk-api-key"  content="">
     <title>DocTalk — Ask your files anything</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -217,24 +219,82 @@
             font-style: italic;
         }
 
-        /* bubbles */
-        .bubble { padding: 13px 16px; border-radius: 8px; font-size: 0.83rem; line-height: 1.65; animation: fadeUp 0.25s ease both; white-space: pre-wrap; word-break: break-word; }
+        /* ── Bubbles ────────────────────────────────────── */
+        .bubble {
+            padding: 13px 16px;
+            border-radius: 8px;
+            font-size: 0.83rem;
+            line-height: 1.65;
+            animation: fadeUp 0.25s ease both;
+            word-break: break-word;
+        }
         .bubble-q {
             background: rgba(255,255,255,0.03);
             border: 1px solid var(--border);
             border-left: 3px solid var(--border-hi);
             color: var(--muted);
+            white-space: pre-wrap;
         }
-        .bubble-q::before { content: "you"; font-size: 0.63rem; letter-spacing: 0.12em; text-transform: uppercase; display: block; margin-bottom: 5px; color: var(--border-hi); }
+        .bubble-q::before {
+            content: "you";
+            font-size: 0.63rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 5px;
+            color: var(--border-hi);
+        }
         .bubble-a {
             background: rgba(200,240,96,0.04);
             border: 1px solid rgba(200,240,96,0.12);
             border-left: 3px solid var(--accent);
             color: var(--text);
         }
-        .bubble-a::before { content: "doc"; font-size: 0.63rem; letter-spacing: 0.12em; text-transform: uppercase; display: block; margin-bottom: 5px; color: var(--accent-dim); }
+        .bubble-a::before {
+            content: "doc";
+            font-size: 0.63rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 5px;
+            color: var(--accent-dim);
+        }
+        /* Answer body — wraps naturally */
+        .bubble-a .answer-body {
+            white-space: pre-wrap;
+        }
+        /* Source citation pill */
+        .bubble-a .sources {
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(200,240,96,0.12);
+            font-size: 0.72rem;
+            color: var(--accent-dim);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            align-items: center;
+        }
+        .bubble-a .sources .src-label {
+            color: var(--muted);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            font-size: 0.63rem;
+        }
+        .bubble-a .sources .src-pill {
+            background: rgba(200,240,96,0.08);
+            border: 1px solid rgba(200,240,96,0.2);
+            border-radius: 4px;
+            padding: 2px 7px;
+            font-size: 0.69rem;
+            color: var(--accent);
+        }
         /* streaming cursor */
-        .bubble-a.streaming::after { content: "▋"; animation: blink 0.6s step-end infinite; color: var(--accent); }
+        .bubble-a.streaming .answer-body::after {
+            content: "▋";
+            animation: blink 0.6s step-end infinite;
+            color: var(--accent);
+        }
         @keyframes blink { 50% { opacity: 0; } }
 
         /* ── Input row ──────────────────────────────────── */
@@ -288,7 +348,7 @@
 
 <header>
     <div class="logo">Doc<em>Talk</em></div>
-    <p class="tagline">Ask your files anything · streaming · memory</p>
+    <p class="tagline">Ask your files anything · streaming · citations</p>
 </header>
 
 <div class="card">
@@ -340,37 +400,38 @@
 </div>
 
 <script>
-// ── Config ────────────────────────────────────────────────────────
-const API_BASE = "http://127.0.0.1:8000";
-const API_KEY  = "";   // set if API_KEY env var is configured on server
+// ── Config (read from <meta> tags so this file is environment-agnostic) ───────
+const API_BASE = document.querySelector('meta[name="doctalk-api-base"]')?.content || "http://127.0.0.1:8000";
+const API_KEY  = document.querySelector('meta[name="doctalk-api-key"]')?.content  || "";
 
-// ── State ─────────────────────────────────────────────────────────
-let sessionId    = sessionStorage.getItem("doctalk_sid") || null;
-let busy         = false;
-let selectedFile = null;
-let streamingBubble = null;
+// ── State ─────────────────────────────────────────────────────────────────────
+let sessionId       = sessionStorage.getItem("doctalk_sid") || null;
+let busy            = false;
+let selectedFile    = null;
+let streamingBubble = null;   // the current .bubble-a DOM node
+let streamingBody   = null;   // its .answer-body child
 
-// ── DOM refs ──────────────────────────────────────────────────────
-const dropArea     = document.getElementById("dropArea");
-const fileInput    = document.getElementById("fileInput");
-const filePill     = document.getElementById("filePill");
-const fileNameEl   = document.getElementById("fileName");
-const fileSizeEl   = document.getElementById("fileSize");
-const removeFile   = document.getElementById("removeFile");
-const uploadBtn    = document.getElementById("uploadBtn");
-const uploadToast  = document.getElementById("uploadToast");
-const chatLog      = document.getElementById("chatLog");
-const questionInput= document.getElementById("questionInput");
-const askBtn       = document.getElementById("askBtn");
-const clearBtn     = document.getElementById("clearBtn");
-const sessionBar   = document.getElementById("sessionBar");
-const sessionIdEl  = document.getElementById("sessionId");
-const endSessionEl = document.getElementById("endSession");
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const dropArea      = document.getElementById("dropArea");
+const fileInput     = document.getElementById("fileInput");
+const filePill      = document.getElementById("filePill");
+const fileNameEl    = document.getElementById("fileName");
+const fileSizeEl    = document.getElementById("fileSize");
+const removeFile    = document.getElementById("removeFile");
+const uploadBtn     = document.getElementById("uploadBtn");
+const uploadToast   = document.getElementById("uploadToast");
+const chatLog       = document.getElementById("chatLog");
+const questionInput = document.getElementById("questionInput");
+const askBtn        = document.getElementById("askBtn");
+const clearBtn      = document.getElementById("clearBtn");
+const sessionBar    = document.getElementById("sessionBar");
+const sessionIdEl   = document.getElementById("sessionId");
+const endSessionEl  = document.getElementById("endSession");
 
-// ── Init ──────────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────────────────────
 if (sessionId) activateChat();
 
-// ── Drag & drop ───────────────────────────────────────────────────
+// ── Drag & drop ───────────────────────────────────────────────────────────────
 dropArea.addEventListener("dragover",  e => { e.preventDefault(); dropArea.classList.add("over"); });
 dropArea.addEventListener("dragleave", ()  => dropArea.classList.remove("over"));
 dropArea.addEventListener("drop", e => {
@@ -397,7 +458,7 @@ function clearFile() {
     uploadBtn.disabled = true;
 }
 
-// ── Upload ────────────────────────────────────────────────────────
+// ── Upload ────────────────────────────────────────────────────────────────────
 uploadBtn.addEventListener("click", doUpload);
 
 async function doUpload() {
@@ -425,7 +486,7 @@ async function doUpload() {
     }
 }
 
-// ── Ask (streaming) ───────────────────────────────────────────────
+// ── Ask (streaming) ───────────────────────────────────────────────────────────
 askBtn.addEventListener("click", doAsk);
 questionInput.addEventListener("keydown", e => { if (e.key === "Enter" && !askBtn.disabled) doAsk(); });
 clearBtn.addEventListener("click", () => { chatLog.innerHTML = ""; });
@@ -441,8 +502,12 @@ async function doAsk() {
     questionInput.value = "";
 
     addBubble("q", q);
-    streamingBubble = addBubble("a", "");
-    streamingBubble.classList.add("streaming");
+
+    // Build answer bubble with separate body + sources container
+    const [bubble, bodyEl] = addAnswerBubble();
+    streamingBubble = bubble;
+    streamingBody   = bodyEl;
+    bubble.classList.add("streaming");
 
     try {
         const res = await apiFetch("/ask", {
@@ -455,8 +520,8 @@ async function doAsk() {
             sessionStorage.removeItem("doctalk_sid");
             sessionId = null;
             deactivateChat();
-            streamingBubble.textContent = "⚠ Session expired — please upload the file again.";
-            streamingBubble.classList.remove("streaming");
+            bodyEl.textContent = "⚠ Session expired — please upload the file again.";
+            bubble.classList.remove("streaming");
             return;
         }
         if (!res.ok) {
@@ -464,7 +529,7 @@ async function doAsk() {
             throw new Error(err.detail || "Request failed");
         }
 
-        // Read the stream
+        // Stream
         const reader  = res.body.getReader();
         const decoder = new TextDecoder();
         let fullText  = "";
@@ -472,23 +537,59 @@ async function doAsk() {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            const chunk = decoder.decode(value, { stream: true });
-            fullText += chunk;
-            streamingBubble.textContent = fullText;
-            chatLog.scrollTop = chatLog.scrollHeight;
+            fullText += decoder.decode(value, { stream: true });
+            bodyEl.textContent = fullText;
+            chatLog.scrollTop  = chatLog.scrollHeight;
         }
+
+        // Parse "Sources: [page X], [page Y]" from the final text and render as pills
+        renderSources(bubble, bodyEl, fullText);
+
     } catch (err) {
-        if (streamingBubble) {
-            streamingBubble.textContent = "⚠ Error: " + err.message;
-        }
+        bodyEl.textContent = "⚠ Error: " + err.message;
     } finally {
         if (streamingBubble) streamingBubble.classList.remove("streaming");
         streamingBubble = null;
+        streamingBody   = null;
         setBusy(false, askBtn, "Ask");
         questionInput.disabled = false;
         questionInput.focus();
         chatLog.scrollTop = chatLog.scrollHeight;
     }
+}
+
+/**
+ * Extract "Sources: [page X], [page Y]" from raw answer text,
+ * strip it from the body, and render it as styled pills.
+ */
+function renderSources(bubble, bodyEl, fullText) {
+    const sourceLineRe = /\nSources:\s*(.+)$/m;
+    const match = fullText.match(sourceLineRe);
+    if (!match) return;
+
+    // Remove sources line from displayed answer text
+    bodyEl.textContent = fullText.replace(sourceLineRe, "").trimEnd();
+
+    // Extract individual page refs like [page 3]
+    const refs = [...match[1].matchAll(/\[([^\]]+)\]/g)].map(m => m[1]);
+    if (!refs.length) return;
+
+    const sourcesEl = document.createElement("div");
+    sourcesEl.className = "sources";
+
+    const label = document.createElement("span");
+    label.className = "src-label";
+    label.textContent = "Sources";
+    sourcesEl.appendChild(label);
+
+    refs.forEach(ref => {
+        const pill = document.createElement("span");
+        pill.className = "src-pill";
+        pill.textContent = ref;
+        sourcesEl.appendChild(pill);
+    });
+
+    bubble.appendChild(sourcesEl);
 }
 
 async function doEndSession() {
@@ -503,7 +604,7 @@ async function doEndSession() {
     toast(uploadToast, "Session ended.", "inf");
 }
 
-// ── Helpers ───────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function addBubble(type, text) {
     const d = document.createElement("div");
     d.className = `bubble bubble-${type}`;
@@ -511,6 +612,20 @@ function addBubble(type, text) {
     chatLog.appendChild(d);
     chatLog.scrollTop = chatLog.scrollHeight;
     return d;
+}
+
+/** Creates an answer bubble with an inner .answer-body span for streaming. */
+function addAnswerBubble() {
+    const bubble = document.createElement("div");
+    bubble.className = "bubble bubble-a";
+
+    const body = document.createElement("span");
+    body.className = "answer-body";
+    bubble.appendChild(body);
+
+    chatLog.appendChild(bubble);
+    chatLog.scrollTop = chatLog.scrollHeight;
+    return [bubble, body];
 }
 
 function activateChat() {

@@ -1,6 +1,9 @@
 import os
+import json
 import logging
 import tempfile
+import asyncio
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import threading
@@ -8,11 +11,20 @@ import threading
 from dotenv import load_dotenv
 load_dotenv()
 
-# ── Logging ───────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+# ── Structured logging ────────────────────────────────────────────────────────
+class JSONFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps({
+            "ts":      self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level":   record.levelname,
+            "logger":  record.name,
+            "msg":     record.getMessage(),
+            **({"exc": self.formatException(record.exc_info)} if record.exc_info else {}),
+        })
+
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
@@ -35,13 +47,14 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 # ── Config ────────────────────────────────────────────────────────────────────
-MAX_FILE_SIZE     = int(os.getenv("MAX_FILE_SIZE_MB", "10")) * 1024 * 1024
-CHUNK_SIZE        = int(os.getenv("CHUNK_SIZE", "500"))
-CHUNK_OVERLAP     = int(os.getenv("CHUNK_OVERLAP", "100"))
-TOP_K             = int(os.getenv("TOP_K", "5"))
+MAX_FILE_SIZE     = int(os.getenv("MAX_FILE_SIZE_MB",  "10"))   * 1024 * 1024
+CHUNK_SIZE        = int(os.getenv("CHUNK_SIZE",        "500"))
+CHUNK_OVERLAP     = int(os.getenv("CHUNK_OVERLAP",     "100"))
+TOP_K             = int(os.getenv("TOP_K",             "5"))
 SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "24"))
-PERSIST_DIR       = os.getenv("FAISS_PERSIST_DIR", "./faiss_store")
-API_KEY           = os.getenv("API_KEY", "")   # empty string = auth disabled
+PERSIST_DIR       = os.getenv("FAISS_PERSIST_DIR",     "./faiss_store")
+API_KEY           = os.getenv("API_KEY",               "")
+VS_CACHE_SIZE     = int(os.getenv("VS_CACHE_SIZE",     "20"))   # max sessions in RAM
 
 ALLOWED_EXTENSIONS = {
     ".pdf", ".csv", ".json",
@@ -58,6 +71,14 @@ TEXT_EXTENSIONS = {
 
 os.makedirs(PERSIST_DIR, exist_ok=True)
 
+# ── Global metrics counters ───────────────────────────────────────────────────
+_metrics: Dict[str, int] = {
+    "uploads_total":   0,
+    "uploads_failed":  0,
+    "questions_total": 0,
+    "sessions_active": 0,
+}
+
 # ── Rate limiter ──────────────────────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address)
 
@@ -65,6 +86,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="DocTalk API",
     description="Upload files and chat with their content — streaming, memory, persistent storage.",
+    version="2.0.0",
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -83,7 +105,6 @@ app.add_middleware(
 
 # ── Auth dependency ───────────────────────────────────────────────────────────
 def require_api_key(request: Request) -> None:
-    """Soft API-key guard — disabled when API_KEY env var is unset."""
     if not API_KEY:
         return
     if request.headers.get("x-api-key", "") != API_KEY:
@@ -98,7 +119,7 @@ llm = ChatOllama(
     num_predict=int(os.getenv("NUM_PREDICT", "512")),
 )
 
-# ── Improved RAG prompt ───────────────────────────────────────────────────────
+# ── RAG prompt ────────────────────────────────────────────────────────────────
 RAG_PROMPT = ChatPromptTemplate.from_template(
     """You are a precise document assistant. Answer questions strictly from the context below.
 
@@ -106,7 +127,9 @@ Rules:
 - Use ONLY the provided context. No outside knowledge.
 - If the answer is absent from the context, say: "I don't know based on the provided document."
 - Be concise and direct. Skip filler like "Based on the context...".
-- Cite the relevant part of the document when it strengthens your answer.
+- After your answer, list the sources you used on a new line in the format:
+  Sources: [page X], [page Y]  (use the page numbers shown in the context blocks)
+  If no page numbers are available, omit the Sources line.
 - Never guess, infer beyond the text, or hallucinate.
 
 --- DOCUMENT CONTEXT ---
@@ -120,36 +143,82 @@ User: {question}
 Assistant:"""
 )
 
+# ── LRU vectorstore cache ─────────────────────────────────────────────────────
+class LRUVectorstoreCache:
+    """
+    Thread-safe in-memory LRU cache for FAISS vectorstores.
+    Prevents repeated disk I/O on every query for the same session.
+    Max size is VS_CACHE_SIZE; evicted entries are dropped from RAM
+    but remain on disk for reload if needed.
+    """
+
+    def __init__(self, maxsize: int = 20) -> None:
+        self._cache: OrderedDict[str, FAISS] = OrderedDict()
+        self._maxsize = maxsize
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Optional[FAISS]:
+        with self._lock:
+            if key not in self._cache:
+                return None
+            self._cache.move_to_end(key)
+            return self._cache[key]
+
+    def put(self, key: str, vs: FAISS) -> None:
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            else:
+                if len(self._cache) >= self._maxsize:
+                    self._cache.popitem(last=False)   # evict LRU
+            self._cache[key] = vs
+
+    def remove(self, key: str) -> None:
+        with self._lock:
+            self._cache.pop(key, None)
+
+
+vs_cache = LRUVectorstoreCache(maxsize=VS_CACHE_SIZE)
+
 # ── Session store ─────────────────────────────────────────────────────────────
 class SessionStore:
     """
     Registry of active sessions.
-    Vectorstores are persisted to disk (FAISS save_local/load_local).
+    Vectorstores are persisted to disk; hot sessions are cached in RAM via LRUVectorstoreCache.
     Chat history is kept in memory (last 20 turns per session).
     """
 
     def __init__(self, ttl_hours: int = 24) -> None:
-        self._meta: Dict[str, dict] = {}   # session_id → {created_at, history}
+        self._meta: Dict[str, dict] = {}
         self._ttl  = timedelta(hours=ttl_hours)
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._start_cleanup_thread()
-        logger.info("SessionStore ready (TTL=%dh, dir=%s)", ttl_hours, PERSIST_DIR)
+        logger.info("SessionStore ready", extra={"ttl_h": ttl_hours, "dir": PERSIST_DIR})
 
     # ── public ────────────────────────────────────────────────
 
     def create(self, session_id: str, vectorstore: FAISS) -> None:
         vectorstore.save_local(self._path(session_id))
+        vs_cache.put(session_id, vectorstore)
         with self._lock:
             self._meta[session_id] = {"created_at": datetime.now(), "history": []}
+        _metrics["sessions_active"] = len(self._meta)
         logger.info("Session created: %s", session_id[:8])
 
     def get_vectorstore(self, session_id: str) -> FAISS:
         self._validate(session_id)
+        # 1) try RAM cache first
+        vs = vs_cache.get(session_id)
+        if vs is not None:
+            return vs
+        # 2) fall back to disk
         path = self._path(session_id)
         if not os.path.isdir(path):
             raise HTTPException(status_code=404, detail="Session data missing on disk.")
-        return FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True)
+        vs = FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True)
+        vs_cache.put(session_id, vs)
+        return vs
 
     def get_history(self, session_id: str) -> List[dict]:
         self._validate(session_id)
@@ -161,17 +230,22 @@ class SessionStore:
         with self._lock:
             hist = self._meta[session_id]["history"]
             hist.append({"role": role, "content": content})
-            # cap at 20 turns to avoid context overflow
             self._meta[session_id]["history"] = hist[-20:]
 
     def remove(self, session_id: str) -> None:
+        vs_cache.remove(session_id)
         with self._lock:
             self._meta.pop(session_id, None)
         import shutil as _shutil
         path = self._path(session_id)
         if os.path.isdir(path):
             _shutil.rmtree(path, ignore_errors=True)
+        _metrics["sessions_active"] = len(self._meta)
         logger.info("Session removed: %s", session_id[:8])
+
+    def active_count(self) -> int:
+        with self._lock:
+            return len(self._meta)
 
     def shutdown(self) -> None:
         self._stop.set()
@@ -296,6 +370,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> dict:
     contents = await file.read()
 
     if len(contents) > MAX_FILE_SIZE:
+        _metrics["uploads_failed"] += 1
         raise HTTPException(
             status_code=413,
             detail=f"File exceeds the {MAX_FILE_SIZE // (1024*1024)} MB limit.",
@@ -303,6 +378,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> dict:
 
     ext = os.path.splitext(file.filename)[1].lower() or ".txt"
     if ext not in ALLOWED_EXTENSIONS:
+        _metrics["uploads_failed"] += 1
         raise HTTPException(status_code=415, detail=f"Unsupported file type: '{ext}'.")
 
     session_id = str(uuid.uuid4())
@@ -317,20 +393,32 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> dict:
         if not docs:
             raise HTTPException(status_code=422, detail="Could not extract text from file.")
 
+        # Inject page numbers into metadata for loaders that don't add them (docx/xlsx)
+        for i, doc in enumerate(docs):
+            if "page" not in doc.metadata:
+                doc.metadata["page"] = i + 1
+
         splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
         chunks = splitter.split_documents(docs)
         if not chunks:
             raise HTTPException(status_code=422, detail="File appears empty after processing.")
 
-        vectorstore = FAISS.from_documents(chunks, embeddings)
+        # Run embedding in thread pool to avoid blocking event loop
+        vectorstore = await asyncio.to_thread(FAISS.from_documents, chunks, embeddings)
         sessions.create(session_id, vectorstore)
 
-        logger.info("Upload OK — session=%s file=%s chunks=%d", session_id[:8], file.filename, len(chunks))
+        _metrics["uploads_total"] += 1
+        logger.info(
+            "Upload OK — session=%s file=%s chunks=%d",
+            session_id[:8], file.filename, len(chunks),
+        )
         return {"message": "File processed successfully.", "session_id": session_id}
 
     except HTTPException:
+        _metrics["uploads_failed"] += 1
         raise
     except Exception as exc:
+        _metrics["uploads_failed"] += 1
         logger.exception("Upload error for file: %s", file.filename)
         raise HTTPException(status_code=500, detail=f"Processing error: {exc}")
     finally:
@@ -348,6 +436,8 @@ class Query(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("Question cannot be empty.")
+        if len(v) > 2000:
+            raise ValueError("Question too long (max 2000 characters).")
         return v
 
 
@@ -360,17 +450,28 @@ def _fmt_history(history: List[dict]) -> str:
     )
 
 
+def _fmt_context(docs: List[Document]) -> str:
+    """Format retrieved chunks with page numbers for citation."""
+    parts = []
+    for doc in docs:
+        page = doc.metadata.get("page", "?")
+        parts.append(f"[page {page}]\n{doc.page_content}")
+    return "\n\n".join(parts)
+
+
 @app.post("/ask", dependencies=[Depends(require_api_key)])
 @limiter.limit("30/minute")
 async def ask_question(request: Request, query: Query) -> StreamingResponse:
-    # ③ Query logging
     logger.info("Question — session=%s q=%r", query.session_id[:8], query.question)
+    _metrics["questions_total"] += 1
 
+    # Retrieval in thread pool (FAISS search is sync)
     vectorstore = sessions.get_vectorstore(query.session_id)
     history     = sessions.get_history(query.session_id)
 
-    docs    = vectorstore.as_retriever(search_kwargs={"k": TOP_K}).invoke(query.question)
-    context = "\n\n".join(d.page_content for d in docs)
+    retriever = vectorstore.as_retriever(search_kwargs={"k": TOP_K})
+    docs      = await asyncio.to_thread(retriever.invoke, query.question)
+    context   = _fmt_context(docs)
 
     final_prompt = RAG_PROMPT.invoke({
         "context":  context,
@@ -383,7 +484,8 @@ async def ask_question(request: Request, query: Query) -> StreamingResponse:
     async def stream_tokens():
         collected: List[str] = []
         try:
-            for chunk in llm.stream(final_prompt):
+            # llm.astream is truly async — does not block the event loop
+            async for chunk in llm.astream(final_prompt):
                 token = chunk.content
                 if token:
                     collected.append(token)
@@ -407,4 +509,20 @@ async def delete_session(session_id: str) -> dict:
 # ── /health ───────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {
+        "status":    "ok",
+        "timestamp": datetime.timezone.utc().isoformat(),
+        "sessions":  sessions.active_count(),
+    }
+
+
+# ── /metrics ──────────────────────────────────────────────────────────────────
+@app.get("/metrics")
+async def metrics() -> dict:
+    """Lightweight operational counters — wire to Prometheus/Grafana if desired."""
+    return {
+        **_metrics,
+        "sessions_active": sessions.active_count(),
+        "vs_cache_size":   VS_CACHE_SIZE,
+        "timestamp":       datetime.timezone.utc().isoformat(),
+    }

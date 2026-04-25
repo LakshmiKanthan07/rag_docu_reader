@@ -1,55 +1,62 @@
-# LangChain File Chatbot
+# DocTalk API
 
-A simple FastAPI + LangChain chatbot that accepts uploaded files, builds embeddings with FAISS, and answers questions from the document content.
+A FastAPI + LangChain RAG service that accepts file uploads, builds FAISS vectorstores, and streams answers from document content using Ollama.
 
 ## Features
 
-- Upload arbitrary files from the browser
+- Upload arbitrary files from the browser or API
 - Supports PDF, TXT, MD, HTML, CSV, JSON, DOCX, XLSX, and more
-- Uses LangChain embeddings + FAISS for retrieval
-- Provides a local frontend in `index.html`
+- FAISS + LangChain embeddings for efficient retrieval
+- Streaming responses with conversation history
+- Session-based isolation with TTL cleanup
+- LRU in-memory cache for hot vectorstores
+- Rate limiting and optional API key authentication
+- Structured JSON logging
+
+## Tech Stack
+
+- **Backend**: FastAPI, Uvicorn
+- **LLM**: Ollama (`llama3` by default)
+- **Embeddings**: Ollama (`nomic-embed-text` by default)
+- **Vector Store**: FAISS (persisted to disk + in-memory LRU cache)
+- **Document Loaders**: PyPDF, python-docx, openpyxl, CSV/JSON via langchain-community
 
 ## Requirements
 
-- Python 3.10+ (recommended)
-- `uvicorn`
-- `fastapi`
-- `langchain-ollama`
-- `langchain-community`
-- `langchain-text-splitters`
-- `faiss-cpu`
-- `python-docx`
-- `openpyxl`
+- Python 3.10+
+- Ollama running locally with `llama3` and `nomic-embed-text` models pulled
 
 ## Setup
 
 1. Clone the repository.
-2. Create a virtual environment:
+2. Create and activate a virtual environment:
 
-```bash
-python -m venv .venv
-.\.venv\Scripts\activate
-```
+   ```bash
+   python -m venv .venv
+   .\.venv\Scripts\activate
+   ```
 
 3. Install dependencies:
 
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-4. Copy the environment template:
+4. Configure environment variables:
 
-```powershell
-copy .env.template .env
-```
+   ```bash
+   copy .env.template .env
+   ```
 
-5. Update `.env` with your API keys and preferred settings.
+   Edit `.env` as needed (API_KEY, CORS_ORIGINS, model names, etc.).
 
 ## Run the backend
 
 ```bash
 uvicorn main:app --reload
 ```
+
+The API will be available at `http://localhost:8000`.
 
 ## Run the frontend
 
@@ -59,8 +66,39 @@ python -m http.server 5500
 
 Open `http://127.0.0.1:5500` in your browser, upload a file, then ask questions.
 
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/upload` | Upload a file → creates a new session |
+| POST | `/ask` | Ask a question (streaming response) |
+| DELETE | `/session/{session_id}` | Delete a session and its data |
+| GET | `/health` | Health check |
+| GET | `/metrics` | Operational metrics |
+
+All endpoints except `/health` and `/metrics` require an API key (if configured) via `x-api-key` header.
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_KEY` | (none) | If set, all requests must include this key |
+| `MAX_FILE_SIZE_MB` | `10` | Maximum upload size in MB |
+| `CHUNK_SIZE` | `500` | Document chunk size for embeddings |
+| `CHUNK_OVERLAP` | `100` | Overlap between chunks |
+| `TOP_K` | `5` | Number of context chunks retrieved per query |
+| `SESSION_TTL_HOURS` | `24` | Session expiration time |
+| `FAISS_PERSIST_DIR` | `./faiss_store` | Directory for persisted vectorstores |
+| `VS_CACHE_SIZE` | `20` | Max sessions cached in RAM |
+| `EMBED_MODEL` | `nomic-embed-text` | Ollama embedding model |
+| `OLLAMA_MODEL` | `llama3` | Ollama chat model |
+| `TEMPERATURE` | `0.3` | LLM temperature |
+| `NUM_PREDICT` | `512` | Max tokens per response |
+| `CORS_ORIGINS` | `localhost:8000,5500` | Allowed CORS origins (comma-separated) |
+
 ## Notes
 
-- The backend currently uses `OllamaEmbeddings` and `ChatOllama`.
 - Uploaded files are temporarily stored and removed after processing.
-- Sessions are stored in memory for 24 hours by default.
+- Vectorstores are persisted to `FAISS_PERSIST_DIR` and kept in an LRU cache in RAM.
+- Sessions expire after `SESSION_TTL_HOURS` of inactivity.
+- The backend requires a running Ollama instance with the configured models available.
