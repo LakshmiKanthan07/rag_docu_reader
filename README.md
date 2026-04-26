@@ -7,7 +7,7 @@ A FastAPI + LangChain RAG service that accepts file uploads, builds FAISS vector
 - Upload arbitrary files from the browser or API
 - Supports PDF, TXT, MD, HTML, CSV, JSON, DOCX, XLSX, and more
 - FAISS + LangChain embeddings for efficient retrieval
-- Streaming responses with conversation history
+- Streaming responses with conversation history and citation sources
 - Session-based isolation with TTL cleanup
 - LRU in-memory cache for hot vectorstores
 - Rate limiting and optional API key authentication
@@ -16,7 +16,7 @@ A FastAPI + LangChain RAG service that accepts file uploads, builds FAISS vector
 ## Tech Stack
 
 - **Backend**: FastAPI, Uvicorn
-- **LLM**: Ollama (`llama3` by default)
+- **LLM**: Groq (`llama-3.3-70b-versatile` by default)
 - **Embeddings**: Ollama (`nomic-embed-text` by default)
 - **Vector Store**: FAISS (persisted to disk + in-memory LRU cache)
 - **Document Loaders**: PyPDF, python-docx, openpyxl, CSV/JSON via langchain-community
@@ -60,11 +60,13 @@ The API will be available at `http://localhost:8000`.
 
 ## Run the frontend
 
+Open `index.html` in your browser (or serve it via any HTTP server):
+
 ```bash
 python -m http.server 5500
 ```
 
-Open `http://127.0.0.1:5500` in your browser, upload a file, then ask questions.
+Then open `http://127.0.0.1:5500` in your browser. The frontend is configured to connect to the API at `http://127.0.0.1:8000` by default (configurable in the HTML meta tags).
 
 ## API Endpoints
 
@@ -85,15 +87,16 @@ All endpoints except `/health` and `/metrics` require an API key (if configured)
 | `API_KEY` | (none) | If set, all requests must include this key |
 | `MAX_FILE_SIZE_MB` | `10` | Maximum upload size in MB |
 | `CHUNK_SIZE` | `500` | Document chunk size for embeddings |
-| `CHUNK_OVERLAP` | `100` | Overlap between chunks |
+| `CHUNK_OVERLAP` | `50` | Overlap between chunks |
 | `TOP_K` | `5` | Number of context chunks retrieved per query |
 | `SESSION_TTL_HOURS` | `24` | Session expiration time |
 | `FAISS_PERSIST_DIR` | `./faiss_store` | Directory for persisted vectorstores |
 | `VS_CACHE_SIZE` | `20` | Max sessions cached in RAM |
 | `EMBED_MODEL` | `nomic-embed-text` | Ollama embedding model |
-| `OLLAMA_MODEL` | `llama3` | Ollama chat model |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq chat model |
+| `GROQ_API_KEY` | (none) | Groq API key (required) |
 | `TEMPERATURE` | `0.3` | LLM temperature |
-| `NUM_PREDICT` | `512` | Max tokens per response |
+| `MAX_TOKENS` | `1024` | Max tokens per response |
 | `CORS_ORIGINS` | `localhost:8000,5500` | Allowed CORS origins (comma-separated) |
 
 ## Notes
@@ -101,4 +104,4 @@ All endpoints except `/health` and `/metrics` require an API key (if configured)
 - Uploaded files are temporarily stored and removed after processing.
 - Vectorstores are persisted to `FAISS_PERSIST_DIR` and kept in an LRU cache in RAM.
 - Sessions expire after `SESSION_TTL_HOURS` of inactivity.
-- The backend requires a running Ollama instance with the configured models available.
+- The backend requires a running Ollama instance (for embeddings) and a Groq API key (for LLM inference).
