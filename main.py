@@ -34,7 +34,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 import uuid
 
-from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_ollama import OllamaEmbeddings
+from langchain_groq import ChatGroq
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, CSVLoader, JSONLoader
 from langchain_core.documents.base import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -87,6 +88,8 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # startup
+    if not os.getenv("GROQ_API_KEY"):
+        logger.error("GROQ_API_KEY is not set — LLM calls will fail.")
     try:
         embeddings.embed_query("ping")
         logger.info("Ollama embeddings reachable.")
@@ -129,10 +132,11 @@ def require_api_key(request: Request) -> None:
 # ── LLM & Embeddings ──────────────────────────────────────────────────────────
 embeddings = OllamaEmbeddings(model=os.getenv("EMBED_MODEL", "nomic-embed-text"))
 
-llm = ChatOllama(
-    model=os.getenv("OLLAMA_MODEL", "llama3"),
+llm = ChatGroq(
+    model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    api_key=os.getenv("GROQ_API_KEY"),
     temperature=float(os.getenv("TEMPERATURE", "0.3")),
-    num_predict=int(os.getenv("NUM_PREDICT", "512")),
+    max_tokens=int(os.getenv("MAX_TOKENS", "1024")),
 )
 
 # ── RAG prompt ────────────────────────────────────────────────────────────────
