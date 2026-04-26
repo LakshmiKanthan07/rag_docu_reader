@@ -49,7 +49,7 @@ from slowapi.errors import RateLimitExceeded
 # ── Config ────────────────────────────────────────────────────────────────────
 MAX_FILE_SIZE     = int(os.getenv("MAX_FILE_SIZE_MB",  "10"))   * 1024 * 1024
 CHUNK_SIZE        = int(os.getenv("CHUNK_SIZE",        "500"))
-CHUNK_OVERLAP     = int(os.getenv("CHUNK_OVERLAP",     "100"))
+CHUNK_OVERLAP     = int(os.getenv("CHUNK_OVERLAP",     "50"))
 TOP_K             = int(os.getenv("TOP_K",             "5"))
 SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "24"))
 PERSIST_DIR       = os.getenv("FAISS_PERSIST_DIR",     "./faiss_store")
