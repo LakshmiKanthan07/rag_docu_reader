@@ -259,11 +259,9 @@
             margin-bottom: 5px;
             color: var(--accent-dim);
         }
-        /* Answer body — wraps naturally */
         .bubble-a .answer-body {
             white-space: pre-wrap;
         }
-        /* Source citation pill */
         .bubble-a .sources {
             margin-top: 10px;
             padding-top: 8px;
@@ -289,7 +287,6 @@
             font-size: 0.69rem;
             color: var(--accent);
         }
-        /* streaming cursor */
         .bubble-a.streaming .answer-body::after {
             content: "▋";
             animation: blink 0.6s step-end infinite;
@@ -357,44 +354,62 @@
     <div class="upload-zone">
         <p class="label">01 — Upload a file</p>
 
-        <div class="drop-area" id="dropArea">
-            <input type="file" id="fileInput" accept="*/*">
-            <div class="drop-icon">📄</div>
+        <div class="drop-area" id="dropArea" role="button" aria-label="File drop zone — click to browse or drag and drop">
+            <input type="file" id="fileInput" accept="*/*" aria-label="Choose file to upload">
+            <div class="drop-icon" aria-hidden="true">📄</div>
             <p class="drop-hint"><strong>Click to browse</strong> or drag &amp; drop</p>
             <p class="drop-hint" style="font-size:0.72rem">PDF · DOCX · XLSX · TXT · CSV · JSON · code — max 10 MB</p>
         </div>
 
-        <div class="file-pill" id="filePill">
-            <span>📎</span>
+        <div class="file-pill" id="filePill" role="status">
+            <span aria-hidden="true">📎</span>
             <span id="fileName"></span>
             <span id="fileSize" style="color:var(--muted)"></span>
-            <span class="x" id="removeFile" title="Remove">✕</span>
+            <span class="x" id="removeFile" role="button" tabindex="0" title="Remove file" aria-label="Remove selected file">✕</span>
         </div>
 
-        <button class="btn btn-upload" id="uploadBtn" disabled>Upload &amp; Process</button>
-        <div class="toast" id="uploadToast"></div>
+        <button class="btn btn-upload" id="uploadBtn" disabled aria-label="Upload and process the selected file">
+            Upload &amp; Process
+        </button>
+        <div class="toast" id="uploadToast" role="status" aria-live="polite"></div>
     </div>
 
     <!-- ── Chat ────────────────────────────────────────── -->
     <div class="chat-zone">
         <div class="chat-toolbar">
             <p class="label" style="margin:0">02 — Ask questions</p>
-            <button class="btn btn-clear" id="clearBtn" title="Clear conversation">Clear chat</button>
+            <button class="btn btn-clear" id="clearBtn" title="Clear conversation" aria-label="Clear chat history">
+                Clear chat
+            </button>
         </div>
 
-        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-log" id="chatLog" role="log" aria-label="Conversation" aria-live="polite"></div>
 
         <div class="input-row">
-            <input type="text" id="questionInput" placeholder="What does this document say about…" disabled>
-            <button class="btn btn-ask" id="askBtn" disabled>Ask</button>
+            <input
+                type="text"
+                id="questionInput"
+                placeholder="What does this document say about…"
+                disabled
+                aria-label="Ask a question about the uploaded document"
+                autocomplete="off"
+            >
+            <button class="btn btn-ask" id="askBtn" disabled aria-label="Submit question">Ask</button>
         </div>
     </div>
 
     <!-- ── Session bar ──────────────────────────────────── -->
-    <div class="session-bar" id="sessionBar">
-        <span class="dot"></span>
+    <div class="session-bar" id="sessionBar" role="status">
+        <span class="dot" aria-hidden="true"></span>
         <span>Session active · <span id="sessionId"></span></span>
-        <span style="margin-left:auto;cursor:pointer;color:var(--danger)" id="endSession" title="End session">✕ End</span>
+        <span
+            style="margin-left:auto;cursor:pointer;color:var(--danger)"
+            id="endSession"
+            role="button"
+            tabindex="0"
+            title="End session"
+            aria-label="End current session"
+        >✕ End</span>
     </div>
 
 </div>
@@ -408,8 +423,8 @@ const API_KEY  = document.querySelector('meta[name="doctalk-api-key"]')?.content
 let sessionId       = sessionStorage.getItem("doctalk_sid") || null;
 let busy            = false;
 let selectedFile    = null;
-let streamingBubble = null;   // the current .bubble-a DOM node
-let streamingBody   = null;   // its .answer-body child
+let streamingBubble = null;
+let streamingBody   = null;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const dropArea      = document.getElementById("dropArea");
@@ -441,7 +456,11 @@ dropArea.addEventListener("drop", e => {
     if (f) setFile(f);
 });
 fileInput.addEventListener("change", () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+
+// Support keyboard activation for remove button and end session
 removeFile.addEventListener("click", clearFile);
+removeFile.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") clearFile(); });
+endSessionEl.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") doEndSession(); });
 
 function setFile(f) {
     selectedFile = f;
@@ -451,6 +470,7 @@ function setFile(f) {
     uploadBtn.disabled = false;
     toast(uploadToast, "", "");
 }
+
 function clearFile() {
     selectedFile = null;
     fileInput.value = "";
@@ -463,7 +483,7 @@ uploadBtn.addEventListener("click", doUpload);
 
 async function doUpload() {
     if (busy || !selectedFile) return;
-    setBusy(true, uploadBtn, `<span class="spin"></span> Processing…`);
+    setBusy(true, uploadBtn, `<span class="spin" aria-hidden="true"></span> Processing…`);
     toast(uploadToast, "Uploading and indexing…", "inf");
 
     try {
@@ -497,13 +517,12 @@ async function doAsk() {
     const q = questionInput.value.trim();
     if (!q) return;
 
-    setBusy(true, askBtn, `<span class="spin"></span>`);
+    setBusy(true, askBtn, `<span class="spin" aria-hidden="true"></span>`);
     questionInput.disabled = true;
     questionInput.value = "";
 
     addBubble("q", q);
 
-    // Build answer bubble with separate body + sources container
     const [bubble, bodyEl] = addAnswerBubble();
     streamingBubble = bubble;
     streamingBody   = bodyEl;
@@ -529,7 +548,6 @@ async function doAsk() {
             throw new Error(err.detail || "Request failed");
         }
 
-        // Stream
         const reader  = res.body.getReader();
         const decoder = new TextDecoder();
         let fullText  = "";
@@ -542,7 +560,9 @@ async function doAsk() {
             chatLog.scrollTop  = chatLog.scrollHeight;
         }
 
-        // Parse "Sources: [page X], [page Y]" from the final text and render as pills
+        // FIX: use a more robust regex that anchors to end-of-string after optional
+        // whitespace, preventing false matches mid-answer and handling Windows line
+        // endings (\r\n). The 's' flag is not needed since we anchor to end.
         renderSources(bubble, bodyEl, fullText);
 
     } catch (err) {
@@ -560,17 +580,19 @@ async function doAsk() {
 
 /**
  * Extract "Sources: [page X], [page Y]" from raw answer text,
- * strip it from the body, and render it as styled pills.
+ * strip it from the body, and render as styled pills.
+ *
+ * FIX: anchored to end-of-string (\s*$) and handles \r\n so the regex
+ * cannot match a mid-answer line that happens to start with "Sources:".
+ * Also trims trailing whitespace from the answer body after extraction.
  */
 function renderSources(bubble, bodyEl, fullText) {
-    const sourceLineRe = /\nSources:\s*(.+)$/m;
+    const sourceLineRe = /\r?\nSources:\s*(.+?)\s*$/;
     const match = fullText.match(sourceLineRe);
     if (!match) return;
 
-    // Remove sources line from displayed answer text
     bodyEl.textContent = fullText.replace(sourceLineRe, "").trimEnd();
 
-    // Extract individual page refs like [page 3]
     const refs = [...match[1].matchAll(/\[([^\]]+)\]/g)].map(m => m[1]);
     if (!refs.length) return;
 
@@ -592,14 +614,22 @@ function renderSources(bubble, bodyEl, fullText) {
     bubble.appendChild(sourcesEl);
 }
 
+// ── End session ───────────────────────────────────────────────────────────────
 async function doEndSession() {
     if (!sessionId) return;
-    try {
-        await apiFetch(`/session/${sessionId}`, { method: "DELETE" });
-    } catch (_) { /* best-effort */ }
-    sessionStorage.removeItem("doctalk_sid");
+
+    // FIX: disable chat controls immediately to prevent double-fire while
+    // the DELETE request is in flight. Without this, rapid double-clicks
+    // could fire two DELETE requests for the same session_id.
+    const sid = sessionId;
     sessionId = null;
+    sessionStorage.removeItem("doctalk_sid");
     deactivateChat();
+
+    try {
+        await apiFetch(`/session/${sid}`, { method: "DELETE" });
+    } catch (_) { /* best-effort — session may have already expired */ }
+
     chatLog.innerHTML = "";
     toast(uploadToast, "Session ended.", "inf");
 }
@@ -614,7 +644,6 @@ function addBubble(type, text) {
     return d;
 }
 
-/** Creates an answer bubble with an inner .answer-body span for streaming. */
 function addAnswerBubble() {
     const bubble = document.createElement("div");
     bubble.className = "bubble bubble-a";

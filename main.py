@@ -4,7 +4,8 @@ import logging
 import tempfile
 import asyncio
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 import threading
 
@@ -54,7 +55,7 @@ TOP_K             = int(os.getenv("TOP_K",             "5"))
 SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "24"))
 PERSIST_DIR       = os.getenv("FAISS_PERSIST_DIR",     "./faiss_store")
 API_KEY           = os.getenv("API_KEY",               "")
-VS_CACHE_SIZE     = int(os.getenv("VS_CACHE_SIZE",     "20"))   # max sessions in RAM
+VS_CACHE_SIZE     = int(os.getenv("VS_CACHE_SIZE",     "20"))
 
 ALLOWED_EXTENSIONS = {
     ".pdf", ".csv", ".json",
@@ -82,11 +83,26 @@ _metrics: Dict[str, int] = {
 # ── Rate limiter ──────────────────────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address)
 
+# ── Lifespan (replaces deprecated @app.on_event) ─────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
+    try:
+        embeddings.embed_query("ping")
+        logger.info("Ollama embeddings reachable.")
+    except Exception as exc:
+        logger.error("Ollama unreachable at startup: %s", exc)
+    yield
+    # shutdown
+    sessions.shutdown()
+    logger.info("SessionStore shut down cleanly.")
+
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="DocTalk API",
     description="Upload files and chat with their content — streaming, memory, persistent storage.",
-    version="2.0.0",
+    version="2.1.0",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -170,7 +186,7 @@ class LRUVectorstoreCache:
                 self._cache.move_to_end(key)
             else:
                 if len(self._cache) >= self._maxsize:
-                    self._cache.popitem(last=False)   # evict LRU
+                    self._cache.popitem(last=False)  # evict LRU
             self._cache[key] = vs
 
     def remove(self, key: str) -> None:
@@ -194,7 +210,7 @@ class SessionStore:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._start_cleanup_thread()
-        logger.info("SessionStore ready", extra={"ttl_h": ttl_hours, "dir": PERSIST_DIR})
+        logger.info("SessionStore ready — ttl_h=%d dir=%s", ttl_hours, PERSIST_DIR)
 
     # ── public ────────────────────────────────────────────────
 
@@ -208,11 +224,9 @@ class SessionStore:
 
     def get_vectorstore(self, session_id: str) -> FAISS:
         self._validate(session_id)
-        # 1) try RAM cache first
         vs = vs_cache.get(session_id)
         if vs is not None:
             return vs
-        # 2) fall back to disk
         path = self._path(session_id)
         if not os.path.isdir(path):
             raise HTTPException(status_code=404, detail="Session data missing on disk.")
@@ -226,11 +240,17 @@ class SessionStore:
             return list(self._meta[session_id]["history"])
 
     def append_history(self, session_id: str, role: str, content: str) -> None:
-        self._validate(session_id)
+        """
+        Append a turn to history only if the session still exists.
+        Silently no-ops if the session was removed (e.g. expired mid-stream).
+        """
         with self._lock:
-            hist = self._meta[session_id]["history"]
+            meta = self._meta.get(session_id)
+            if meta is None:
+                return
+            hist = meta["history"]
             hist.append({"role": role, "content": content})
-            self._meta[session_id]["history"] = hist[-20:]
+            meta["history"] = hist[-20:]
 
     def remove(self, session_id: str) -> None:
         vs_cache.remove(session_id)
@@ -287,21 +307,6 @@ class SessionStore:
 
 
 sessions = SessionStore(ttl_hours=SESSION_TTL_HOURS)
-
-# ── Lifecycle ─────────────────────────────────────────────────────────────────
-@app.on_event("startup")
-async def on_startup() -> None:
-    try:
-        embeddings.embed_query("ping")
-        logger.info("Ollama embeddings reachable.")
-    except Exception as exc:
-        logger.error("Ollama unreachable at startup: %s", exc)
-
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    sessions.shutdown()
-    logger.info("SessionStore shut down cleanly.")
 
 # ── Document loaders ──────────────────────────────────────────────────────────
 def load_text_file(path: str) -> List[Document]:
@@ -393,7 +398,6 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> dict:
         if not docs:
             raise HTTPException(status_code=422, detail="Could not extract text from file.")
 
-        # Inject page numbers into metadata for loaders that don't add them (docx/xlsx)
         for i, doc in enumerate(docs):
             if "page" not in doc.metadata:
                 doc.metadata["page"] = i + 1
@@ -403,7 +407,6 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> dict:
         if not chunks:
             raise HTTPException(status_code=422, detail="File appears empty after processing.")
 
-        # Run embedding in thread pool to avoid blocking event loop
         vectorstore = await asyncio.to_thread(FAISS.from_documents, chunks, embeddings)
         sessions.create(session_id, vectorstore)
 
@@ -444,14 +447,14 @@ class Query(BaseModel):
 def _fmt_history(history: List[dict]) -> str:
     if not history:
         return "(no prior conversation)"
-    return "\n".join(
-        f"{'User' if h['role'] == 'human' else 'Assistant'}: {h['content']}"
-        for h in history
-    )
+    lines = []
+    for h in history:
+        speaker = "User" if h["role"] == "human" else "Assistant"
+        lines.append(f"{speaker}: {h['content']}")
+    return "\n".join(lines)
 
 
 def _fmt_context(docs: List[Document]) -> str:
-    """Format retrieved chunks with page numbers for citation."""
     parts = []
     for doc in docs:
         page = doc.metadata.get("page", "?")
@@ -465,7 +468,6 @@ async def ask_question(request: Request, query: Query) -> StreamingResponse:
     logger.info("Question — session=%s q=%r", query.session_id[:8], query.question)
     _metrics["questions_total"] += 1
 
-    # Retrieval in thread pool (FAISS search is sync)
     vectorstore = sessions.get_vectorstore(query.session_id)
     history     = sessions.get_history(query.session_id)
 
@@ -479,12 +481,12 @@ async def ask_question(request: Request, query: Query) -> StreamingResponse:
         "question": query.question,
     })
 
-    sessions.append_history(query.session_id, "human", query.question)
-
+    # FIX: buffer both turns and write them together only after the stream
+    # completes. This prevents a partial/empty assistant turn being recorded
+    # if the client disconnects mid-stream, and keeps history consistent.
     async def stream_tokens():
         collected: List[str] = []
         try:
-            # llm.astream is truly async — does not block the event loop
             async for chunk in llm.astream(final_prompt):
                 token = chunk.content
                 if token:
@@ -494,7 +496,11 @@ async def ask_question(request: Request, query: Query) -> StreamingResponse:
             logger.exception("Streaming error — session=%s", query.session_id[:8])
             yield f"\n[ERROR: {exc}]"
         finally:
-            sessions.append_history(query.session_id, "assistant", "".join(collected))
+            full_answer = "".join(collected)
+            # Append both turns atomically only after streaming finishes.
+            # append_history silently no-ops if the session expired mid-stream.
+            sessions.append_history(query.session_id, "human",     query.question)
+            sessions.append_history(query.session_id, "assistant", full_answer)
 
     return StreamingResponse(stream_tokens(), media_type="text/plain")
 
@@ -509,9 +515,10 @@ async def delete_session(session_id: str) -> dict:
 # ── /health ───────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health() -> dict:
+    # FIX: datetime.timezone is not callable; use datetime.now(timezone.utc)
     return {
         "status":    "ok",
-        "timestamp": datetime.timezone.utc().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "sessions":  sessions.active_count(),
     }
 
@@ -519,10 +526,10 @@ async def health() -> dict:
 # ── /metrics ──────────────────────────────────────────────────────────────────
 @app.get("/metrics")
 async def metrics() -> dict:
-    """Lightweight operational counters — wire to Prometheus/Grafana if desired."""
+    # FIX: same datetime.timezone bug corrected here too
     return {
         **_metrics,
         "sessions_active": sessions.active_count(),
         "vs_cache_size":   VS_CACHE_SIZE,
-        "timestamp":       datetime.timezone.utc().isoformat(),
+        "timestamp":       datetime.now(timezone.utc).isoformat(),
     }
