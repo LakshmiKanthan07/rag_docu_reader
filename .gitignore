@@ -5,6 +5,7 @@
 
 # Vector DB / generated data
 db/
+faiss_store/
 *.faiss
 *.pkl
 
