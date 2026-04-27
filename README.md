@@ -67,7 +67,7 @@ A FastAPI + LangChain RAG service that accepts file uploads, builds FAISS vector
    ## Run the backend
 
    ```bash
-   uvicorn main:app --reload
+   python -m uvicorn main:app --reload
    ```
 
    The API will be available at `http://localhost:8000`.
