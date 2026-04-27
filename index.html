@@ -112,8 +112,14 @@
         .drop-hint { font-size: 0.8rem; color: var(--muted); }
         .drop-hint strong { color: var(--accent); font-weight: 500; }
 
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 10px;
+        }
         .file-pill {
-            display: none;
+            display: flex;
             align-items: center;
             gap: 8px;
             background: rgba(200,240,96,0.07);
@@ -122,17 +128,38 @@
             padding: 7px 12px;
             font-size: 0.76rem;
             color: var(--accent);
-            margin-top: 10px;
         }
-        .file-pill.show { display: flex; }
         .file-pill .x {
             margin-left: auto;
             cursor: pointer;
             color: var(--muted);
             transition: color 0.15s;
             font-size: 0.9rem;
+            flex-shrink: 0;
         }
         .file-pill .x:hover { color: var(--danger); }
+        .file-pill .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-pill .fsize { color: var(--muted); flex-shrink: 0; }
+
+        /* per-file upload result rows */
+        .file-results {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .file-result-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.72rem;
+            padding: 5px 10px;
+            border-radius: 5px;
+            border: 1px solid transparent;
+        }
+        .file-result-row.ok   { background: rgba(200,240,96,0.06); border-color: rgba(200,240,96,0.15); color: var(--accent); }
+        .file-result-row.skip { background: rgba(255,200,50,0.06);  border-color: rgba(255,200,50,0.2);  color: #ffc832; }
+        .file-result-row.err  { background: rgba(255,107,107,0.06); border-color: rgba(255,107,107,0.2); color: var(--danger); }
 
         /* ── Buttons ────────────────────────────────────── */
         .btn {
@@ -355,18 +382,13 @@
         <p class="label">01 — Upload a file</p>
 
         <div class="drop-area" id="dropArea" role="button" aria-label="File drop zone — click to browse or drag and drop">
-            <input type="file" id="fileInput" accept="*/*" aria-label="Choose file to upload">
+            <input type="file" id="fileInput" accept="*/*" multiple aria-label="Choose files to upload">
             <div class="drop-icon" aria-hidden="true">📄</div>
             <p class="drop-hint"><strong>Click to browse</strong> or drag &amp; drop</p>
-            <p class="drop-hint" style="font-size:0.72rem">PDF · DOCX · XLSX · TXT · CSV · JSON · code — max 10 MB</p>
+            <p class="drop-hint" style="font-size:0.72rem">PDF · DOCX · XLSX · TXT · CSV · JSON · code — max 50 MB each</p>
         </div>
 
-        <div class="file-pill" id="filePill" role="status">
-            <span aria-hidden="true">📎</span>
-            <span id="fileName"></span>
-            <span id="fileSize" style="color:var(--muted)"></span>
-            <span class="x" id="removeFile" role="button" tabindex="0" title="Remove file" aria-label="Remove selected file">✕</span>
-        </div>
+        <div class="file-list" id="fileList"></div>
 
         <button class="btn btn-upload" id="uploadBtn" disabled aria-label="Upload and process the selected file">
             Upload &amp; Process
@@ -422,17 +444,14 @@ const API_KEY  = document.querySelector('meta[name="doctalk-api-key"]')?.content
 // ── State ─────────────────────────────────────────────────────────────────────
 let sessionId       = sessionStorage.getItem("doctalk_sid") || null;
 let busy            = false;
-let selectedFile    = null;
+let selectedFiles   = [];   // Array<File>
 let streamingBubble = null;
 let streamingBody   = null;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const dropArea      = document.getElementById("dropArea");
 const fileInput     = document.getElementById("fileInput");
-const filePill      = document.getElementById("filePill");
-const fileNameEl    = document.getElementById("fileName");
-const fileSizeEl    = document.getElementById("fileSize");
-const removeFile    = document.getElementById("removeFile");
+const fileList      = document.getElementById("fileList");
 const uploadBtn     = document.getElementById("uploadBtn");
 const uploadToast   = document.getElementById("uploadToast");
 const chatLog       = document.getElementById("chatLog");
@@ -452,53 +471,89 @@ dropArea.addEventListener("dragleave", ()  => dropArea.classList.remove("over"))
 dropArea.addEventListener("drop", e => {
     e.preventDefault();
     dropArea.classList.remove("over");
-    const f = e.dataTransfer.files[0];
-    if (f) setFile(f);
+    addFiles([...e.dataTransfer.files]);
 });
-fileInput.addEventListener("change", () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+fileInput.addEventListener("change", () => {
+    if (fileInput.files.length) addFiles([...fileInput.files]);
+});
 
-// Support keyboard activation for remove button and end session
-removeFile.addEventListener("click", clearFile);
-removeFile.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") clearFile(); });
-endSessionEl.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") doEndSession(); });
-
-function setFile(f) {
-    selectedFile = f;
-    fileNameEl.textContent = f.name;
-    fileSizeEl.textContent = `(${(f.size / 1024).toFixed(1)} KB)`;
-    filePill.classList.add("show");
-    uploadBtn.disabled = false;
-    toast(uploadToast, "", "");
+function addFiles(incoming) {
+    const existing = new Set(selectedFiles.map(f => f.name + f.size));
+    incoming.forEach(f => {
+        if (!existing.has(f.name + f.size)) {
+            selectedFiles.push(f);
+            existing.add(f.name + f.size);
+        }
+    });
+    renderFileList();
 }
 
-function clearFile() {
-    selectedFile = null;
+function removeFileAt(idx) {
+    selectedFiles.splice(idx, 1);
+    renderFileList();
+}
+
+function renderFileList() {
+    fileList.innerHTML = "";
+    selectedFiles.forEach((f, i) => {
+        const pill = document.createElement("div");
+        pill.className = "file-pill";
+        pill.innerHTML = `
+            <span aria-hidden="true">📎</span>
+            <span class="fname" title="${f.name}">${f.name}</span>
+            <span class="fsize">(${(f.size / 1024).toFixed(1)} KB)</span>
+            <span class="x" role="button" tabindex="0" title="Remove" aria-label="Remove ${f.name}">✕</span>
+        `;
+        pill.querySelector(".x").addEventListener("click",   () => removeFileAt(i));
+        pill.querySelector(".x").addEventListener("keydown", e => {
+            if (e.key === "Enter" || e.key === " ") removeFileAt(i);
+        });
+        fileList.appendChild(pill);
+    });
+    uploadBtn.disabled = selectedFiles.length === 0;
+    if (selectedFiles.length === 0) toast(uploadToast, "", "");
+}
+
+function clearAllFiles() {
+    selectedFiles = [];
     fileInput.value = "";
-    filePill.classList.remove("show");
-    uploadBtn.disabled = true;
+    renderFileList();
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 uploadBtn.addEventListener("click", doUpload);
 
 async function doUpload() {
-    if (busy || !selectedFile) return;
+    if (busy || selectedFiles.length === 0) return;
     setBusy(true, uploadBtn, `<span class="spin" aria-hidden="true"></span> Processing…`);
-    toast(uploadToast, "Uploading and indexing…", "inf");
+    toast(uploadToast, `Uploading ${selectedFiles.length} file(s)…`, "inf");
 
     try {
         const form = new FormData();
-        form.append("file", selectedFile);
+        selectedFiles.forEach(f => form.append("files", f));
 
         const res  = await apiFetch("/upload", { method: "POST", body: form });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Upload failed");
+        if (!res.ok) {
+            const msg = data.detail?.message || data.detail || "Upload failed";
+            throw new Error(msg);
+        }
 
         sessionId = data.session_id;
         sessionStorage.setItem("doctalk_sid", sessionId);
-        toast(uploadToast, "✓ File processed — ask your first question", "ok");
+
+        // Render per-file result rows below the toast
+        renderFileResults(data.files || []);
+
+        const okCount   = (data.files || []).filter(r => r.status === "ok").length;
+        const skipCount = (data.files || []).filter(r => r.status !== "ok").length;
+        const summary   = skipCount
+            ? `✓ ${okCount} processed, ${skipCount} skipped — ask your first question`
+            : `✓ ${okCount} file(s) processed — ask your first question`;
+        toast(uploadToast, summary, "ok");
+
         activateChat();
-        clearFile();
+        clearAllFiles();
     } catch (err) {
         toast(uploadToast, "✗ " + err.message, "err");
     } finally {
@@ -506,11 +561,38 @@ async function doUpload() {
     }
 }
 
+function renderFileResults(fileResults) {
+    // Remove any previous results block
+    const prev = document.getElementById("fileResultsBlock");
+    if (prev) prev.remove();
+
+    if (!fileResults.length) return;
+
+    const block = document.createElement("div");
+    block.id = "fileResultsBlock";
+    block.className = "file-results";
+
+    fileResults.forEach(r => {
+        const row = document.createElement("div");
+        const cls = r.status === "ok" ? "ok" : r.status === "error" ? "err" : "skip";
+        row.className = `file-result-row ${cls}`;
+        const icon   = r.status === "ok" ? "✓" : r.status === "error" ? "✗" : "⚠";
+        const detail = r.status === "ok"
+            ? `${r.chunks} chunks`
+            : r.reason || r.status;
+        row.textContent = `${icon} ${r.file}  —  ${detail}`;
+        block.appendChild(row);
+    });
+
+    uploadBtn.insertAdjacentElement("afterend", block);
+}
+
 // ── Ask (streaming) ───────────────────────────────────────────────────────────
 askBtn.addEventListener("click", doAsk);
 questionInput.addEventListener("keydown", e => { if (e.key === "Enter" && !askBtn.disabled) doAsk(); });
 clearBtn.addEventListener("click", () => { chatLog.innerHTML = ""; });
-endSessionEl.addEventListener("click", doEndSession);
+endSessionEl.addEventListener("click",   doEndSession);
+endSessionEl.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") doEndSession(); });
 
 async function doAsk() {
     if (busy || !sessionId) return;
@@ -631,6 +713,7 @@ async function doEndSession() {
     } catch (_) { /* best-effort — session may have already expired */ }
 
     chatLog.innerHTML = "";
+    document.getElementById("fileResultsBlock")?.remove();
     toast(uploadToast, "Session ended.", "inf");
 }
 
