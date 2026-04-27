@@ -49,7 +49,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 # ── Config ────────────────────────────────────────────────────────────────────
-MAX_FILE_SIZE     = int(os.getenv("MAX_FILE_SIZE_MB",  "10"))   * 1024 * 1024
+MAX_FILE_SIZE     = int(os.getenv("MAX_FILE_SIZE_MB",  "50"))   * 1024 * 1024
+MAX_FILES         = int(os.getenv("MAX_FILES_PER_UPLOAD", "0"))   # 0 = no hard limit
 CHUNK_SIZE        = int(os.getenv("CHUNK_SIZE",        "500"))
 CHUNK_OVERLAP     = int(os.getenv("CHUNK_OVERLAP",     "50"))
 TOP_K             = int(os.getenv("TOP_K",             "5"))
@@ -369,68 +370,115 @@ def cleanup_file(path: str) -> None:
     except Exception as exc:
         logger.warning("Could not delete temp file %s: %s", path, exc)
 
-# ── /upload ───────────────────────────────────────────────────────────────────
+# ── /upload  (multi-file → single merged session) ────────────────────────────
 @app.post("/upload", dependencies=[Depends(require_api_key)])
 @limiter.limit("10/minute")
-async def upload_file(request: Request, file: UploadFile = File(...)) -> dict:
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No filename provided.")
+async def upload_files(request: Request, files: List[UploadFile] = File(...)) -> dict:
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
 
-    contents = await file.read()
-
-    if len(contents) > MAX_FILE_SIZE:
-        _metrics["uploads_failed"] += 1
+    if MAX_FILES and len(files) > MAX_FILES:
         raise HTTPException(
-            status_code=413,
-            detail=f"File exceeds the {MAX_FILE_SIZE // (1024*1024)} MB limit.",
+            status_code=400,
+            detail=f"Too many files. Maximum allowed per upload is {MAX_FILES}.",
         )
 
-    ext = os.path.splitext(file.filename)[1].lower() or ".txt"
-    if ext not in ALLOWED_EXTENSIONS:
-        _metrics["uploads_failed"] += 1
-        raise HTTPException(status_code=415, detail=f"Unsupported file type: '{ext}'.")
+    session_id  = str(uuid.uuid4())
+    all_chunks: List[Document] = []
+    tmp_paths:  List[str]      = []
+    file_results               = []   # per-file outcome summary
 
-    session_id = str(uuid.uuid4())
-    tmp_path: Optional[str] = None
+    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+
+    for file in files:
+        if not file.filename:
+            file_results.append({"file": "(unnamed)", "status": "skipped", "reason": "no filename"})
+            continue
+
+        ext = os.path.splitext(file.filename)[1].lower() or ".txt"
+        if ext not in ALLOWED_EXTENSIONS:
+            _metrics["uploads_failed"] += 1
+            file_results.append({
+                "file": file.filename, "status": "skipped",
+                "reason": f"unsupported type '{ext}'",
+            })
+            continue
+
+        contents = await file.read()
+        if len(contents) > MAX_FILE_SIZE:
+            _metrics["uploads_failed"] += 1
+            file_results.append({
+                "file": file.filename, "status": "skipped",
+                "reason": f"exceeds {MAX_FILE_SIZE // (1024*1024)} MB limit",
+            })
+            continue
+
+        tmp_path: Optional[str] = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                tmp.write(contents)
+                tmp_path = tmp.name
+            tmp_paths.append(tmp_path)
+
+            docs = load_documents(tmp_path, file.filename)
+            if not docs:
+                file_results.append({"file": file.filename, "status": "skipped", "reason": "no text extracted"})
+                continue
+
+            # Tag every chunk with its source filename so citations stay traceable
+            for i, doc in enumerate(docs):
+                doc.metadata.setdefault("source", file.filename)
+                if "page" not in doc.metadata:
+                    doc.metadata["page"] = i + 1
+
+            chunks = splitter.split_documents(docs)
+            if not chunks:
+                file_results.append({"file": file.filename, "status": "skipped", "reason": "empty after splitting"})
+                continue
+
+            all_chunks.extend(chunks)
+            file_results.append({"file": file.filename, "status": "ok", "chunks": len(chunks)})
+            logger.info("Loaded — file=%s chunks=%d", file.filename, len(chunks))
+
+        except HTTPException as exc:
+            _metrics["uploads_failed"] += 1
+            file_results.append({"file": file.filename, "status": "error", "reason": exc.detail})
+        except Exception as exc:
+            _metrics["uploads_failed"] += 1
+            logger.exception("Load error for file: %s", file.filename)
+            file_results.append({"file": file.filename, "status": "error", "reason": str(exc)})
+
+    # Clean up all temp files regardless of outcome
+    for p in tmp_paths:
+        cleanup_file(p)
+
+    if not all_chunks:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "No usable content extracted from any file.", "files": file_results},
+        )
 
     try:
-        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-            tmp.write(contents)
-            tmp_path = tmp.name
-
-        docs = load_documents(tmp_path, file.filename)
-        if not docs:
-            raise HTTPException(status_code=422, detail="Could not extract text from file.")
-
-        for i, doc in enumerate(docs):
-            if "page" not in doc.metadata:
-                doc.metadata["page"] = i + 1
-
-        splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
-        chunks = splitter.split_documents(docs)
-        if not chunks:
-            raise HTTPException(status_code=422, detail="File appears empty after processing.")
-
-        vectorstore = await asyncio.to_thread(FAISS.from_documents, chunks, embeddings)
+        # Embed all chunks from all files into one shared vectorstore
+        vectorstore = await asyncio.to_thread(FAISS.from_documents, all_chunks, embeddings)
         sessions.create(session_id, vectorstore)
-
-        _metrics["uploads_total"] += 1
-        logger.info(
-            "Upload OK — session=%s file=%s chunks=%d",
-            session_id[:8], file.filename, len(chunks),
-        )
-        return {"message": "File processed successfully.", "session_id": session_id}
-
-    except HTTPException:
-        _metrics["uploads_failed"] += 1
-        raise
     except Exception as exc:
         _metrics["uploads_failed"] += 1
-        logger.exception("Upload error for file: %s", file.filename)
-        raise HTTPException(status_code=500, detail=f"Processing error: {exc}")
-    finally:
-        if tmp_path:
-            cleanup_file(tmp_path)
+        logger.exception("Vectorstore creation failed — session=%s", session_id[:8])
+        raise HTTPException(status_code=500, detail=f"Indexing error: {exc}")
+
+    ok_count = sum(1 for r in file_results if r["status"] == "ok")
+    _metrics["uploads_total"] += ok_count
+    logger.info(
+        "Upload OK — session=%s files_ok=%d total_chunks=%d",
+        session_id[:8], ok_count, len(all_chunks),
+    )
+    return {
+        "message":      f"{ok_count} file(s) processed and merged into one session.",
+        "session_id":   session_id,
+        "total_chunks": len(all_chunks),
+        "files":        file_results,
+    }
 
 # ── /ask  (streaming) ─────────────────────────────────────────────────────────
 class Query(BaseModel):
