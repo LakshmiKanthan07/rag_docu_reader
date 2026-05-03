@@ -16,7 +16,7 @@ Steps to run DocTalk:
    - Optional: Set API_KEY for authentication
 
 4. Start the backend:
-   - Run: python -m uvicorn main:app --reload
+   - Run: python -m uvicorn rag_docu_reader.main:app --reload
    - API available at: http://localhost:8000
 
 5. Start the frontend:
