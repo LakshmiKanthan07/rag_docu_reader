@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocTalk SaaS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="modal-overlay">
+        <div class="glass-panel auth-box">
+            <h1 class="gradient-text">DocTalk</h1>
+            <p>Sign in to start chatting with your documents.</p>
+            
+            <div class="auth-tabs">
+                <button id="tab-login" class="active">Login</button>
+                <button id="tab-signup">Sign Up</button>
+            </div>
+
+            <form id="auth-form">
+                <input type="email" id="email" placeholder="Email Address" required>
+                <input type="password" id="password" placeholder="Password" required>
+                <button type="submit" class="primary-btn" id="auth-submit-btn">Login</button>
+                <div id="auth-error" class="error-msg"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App UI -->
+    <div id="app-container" class="hidden">
+        <aside class="sidebar glass-panel">
+            <div class="sidebar-header">
+                <h2>DocTalk</h2>
+                <button id="new-chat-btn" class="icon-btn" title="New Chat">+</button>
+            </div>
+            <ul id="chat-list" class="chat-list">
+                <!-- Chats injected here -->
+            </ul>
+            <div class="sidebar-footer">
+                <button id="logout-btn" class="secondary-btn">Logout</button>
+            </div>
+        </aside>
+        
+        <main class="chat-area">
+            <header class="chat-header glass-panel">
+                <h3 id="current-chat-title">Select a chat</h3>
+                <div id="upload-zone" class="upload-zone hidden">
+                    <label for="file-upload" class="upload-label" id="upload-label-btn">
+                        <span class="upload-icon">📄</span> Upload Document
+                    </label>
+                    <input type="file" id="file-upload" accept=".pdf,.txt,.csv,.docx" hidden>
+                    <span id="upload-status"></span>
+                </div>
+                <div id="document-list" class="document-list"></div>
+            </header>
+            
+            <div id="messages" class="messages-container">
+                <div class="welcome-screen">
+                    <h1 class="gradient-text">How can I help you today?</h1>
+                    <p>Select a chat or create a new one to begin.</p>
+                </div>
+            </div>
+            
+            <div class="input-area glass-panel hidden" id="input-area">
+                <form id="chat-form">
+                    <input type="text" id="message-input" placeholder="Message DocTalk..." autocomplete="off" required>
+                    <button type="submit" id="send-btn" class="send-btn">➔</button>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

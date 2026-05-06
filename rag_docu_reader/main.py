@@ -530,9 +530,6 @@ async def ask_question(request: Request, query: Query) -> StreamingResponse:
         "question": query.question,
     })
 
-    # FIX: buffer both turns and write them together only after the stream
-    # completes. This prevents a partial/empty assistant turn being recorded
-    # if the client disconnects mid-stream, and keeps history consistent.
     async def stream_tokens():
         collected: List[str] = []
         try:
@@ -560,22 +557,16 @@ async def delete_session(session_id: str) -> dict:
     sessions.remove(session_id)
     return {"message": "Session deleted."}
 
-
-# ── /health ───────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health() -> dict:
-    # FIX: datetime.timezone is not callable; use datetime.now(timezone.utc)
     return {
         "status":    "ok",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "sessions":  sessions.active_count(),
     }
 
-
-# ── /metrics ──────────────────────────────────────────────────────────────────
 @app.get("/metrics")
 async def metrics() -> dict:
-    # FIX: same datetime.timezone bug corrected here too
     return {
         **_metrics,
         "sessions_active": sessions.active_count(),
