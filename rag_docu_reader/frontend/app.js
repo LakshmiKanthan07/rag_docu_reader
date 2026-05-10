@@ -205,7 +205,11 @@ async function loadMessages(chatId) {
         
         messagesContainer.innerHTML = '';
         if (messages.length === 0) {
-            renderWelcome();
+            messagesContainer.innerHTML = `
+                <div class="empty-chat-msg">
+                    <p>This chat is empty. Upload a document or send a message to get started!</p>
+                </div>
+            `;
             return;
         }
         
@@ -238,6 +242,7 @@ async function loadDocuments(chatId) {
 }
 
 function renderWelcome() {
+    currentChatId = null;
     currentChatTitle.textContent = 'Select a chat';
     uploadZone.classList.add('hidden');
     inputArea.classList.add('hidden');
