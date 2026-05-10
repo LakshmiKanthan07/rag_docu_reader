@@ -1,31 +1,26 @@
 import os
-from langchain_postgres import PGVector
-from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-from app.core.config import settings
 import logging
+from langchain_postgres import PGVector
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Serverless embeddings via HuggingFace Inference API
-# This removes the need to run heavy models on your CPU/GPU
-hf_token = os.getenv("HF_TOKEN")
-if not hf_token:
-    logger.warning("HF_TOKEN not found in environment. Serverless embeddings may fail.")
+def get_embeddings():
+    # Using the more robust HuggingFaceEndpointEmbeddings
+    # This automatically handles the HuggingFace Inference API
+    return HuggingFaceEndpointEmbeddings(
+        huggingfacehub_api_token=settings.HF_TOKEN,
+        model=f"sentence-transformers/{settings.EMBED_MODEL}" if "/" not in settings.EMBED_MODEL else settings.EMBED_MODEL
+    )
 
-embeddings = HuggingFaceInferenceAPIEmbeddings(
-    api_key=hf_token, 
-    model_name=settings.EMBED_MODEL # defaults to "all-MiniLM-L6-v2"
-)
-
-# Supabase (Postgres) connection string for PGVector
-# Note: langchain-postgres uses psycopg v3
-connection_string = settings.DATABASE_URL
-
-def get_vectorstore(collection_name="documents"):
-    """
-    Returns a PGVector instance connected to Supabase.
-    This replaces the local ChromaDB implementation.
-    """
+def get_vectorstore(collection_name: str = "doctalk_collection"):
+    # Ensure the connection string uses the postgresql driver (Supabase provides postgres://)
+    connection_string = settings.DATABASE_URL.replace("postgres://", "postgresql://")
+    
+    # We create the embeddings instance on each call to avoid stale state in long-running processes
+    embeddings = get_embeddings()
+    
     return PGVector(
         embeddings=embeddings,
         collection_name=collection_name,
