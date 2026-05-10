@@ -86,15 +86,19 @@ async def ask_question(
     history = db.query(Message).filter(Message.chat_id == chat_id).order_by(Message.created_at.asc()).limit(20).all()
 
     # 3. Retrieve context
-    vectorstore = get_vectorstore()
-    retriever = vectorstore.as_retriever(
-        search_kwargs={
-            "k": settings.TOP_K, 
-            "filter": {"chat_id": chat_id} # Chroma supports metadata filtering
-        }
-    )
-    docs = await asyncio.to_thread(retriever.invoke, req.question)
-    context = _fmt_context(docs)
+    try:
+        vectorstore = get_vectorstore()
+        retriever = vectorstore.as_retriever(
+            search_kwargs={
+                "k": settings.TOP_K, 
+                "filter": {"chat_id": chat_id} 
+            }
+        )
+        docs = await asyncio.to_thread(retriever.invoke, req.question)
+        context = _fmt_context(docs)
+    except Exception as e:
+        logger.exception("Retrieval error")
+        raise HTTPException(status_code=500, detail=f"Retrieval failed: {str(e)}")
 
     # 4. Prompt construction
     final_prompt = RAG_PROMPT.invoke({

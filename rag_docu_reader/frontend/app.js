@@ -304,7 +304,10 @@ chatForm.addEventListener('submit', async (e) => {
             body: JSON.stringify({ question: text })
         });
         
-        if (!res.ok) throw new Error('Failed to ask question');
+        if (!res.ok) {
+            const errorData = await res.json().catch(() => ({}));
+            throw new Error(errorData.detail || 'Failed to ask question');
+        }
         
         // Read stream
         const reader = res.body.getReader();
