@@ -1,26 +1,34 @@
-import chromadb
-from langchain_chroma import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+import os
+from langchain_postgres import PGVector
+from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Use a free lightweight embedding model, configurable via .env
-embeddings = HuggingFaceEmbeddings(model_name=settings.EMBED_MODEL)
+# Serverless embeddings via HuggingFace Inference API
+# This removes the need to run heavy models on your CPU/GPU
+hf_token = os.getenv("HF_TOKEN")
+if not hf_token:
+    logger.warning("HF_TOKEN not found in environment. Serverless embeddings may fail.")
 
-try:
-    # Try connecting to Chroma Server (Docker)
-    chroma_client = chromadb.HttpClient(host="chroma", port=8000)
-    chroma_client.heartbeat()
-    logger.info("Connected to Chroma HTTP Client")
-except Exception as e:
-    logger.warning(f"Could not connect to Chroma server, falling back to local persistent Chroma: {e}")
-    chroma_client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
+embeddings = HuggingFaceInferenceAPIEmbeddings(
+    api_key=hf_token, 
+    model_name=settings.EMBED_MODEL # defaults to "all-MiniLM-L6-v2"
+)
+
+# Supabase (Postgres) connection string for PGVector
+# Note: langchain-postgres uses psycopg v3
+connection_string = settings.DATABASE_URL
 
 def get_vectorstore(collection_name="documents"):
-    return Chroma(
-        client=chroma_client,
+    """
+    Returns a PGVector instance connected to Supabase.
+    This replaces the local ChromaDB implementation.
+    """
+    return PGVector(
+        embeddings=embeddings,
         collection_name=collection_name,
-        embedding_function=embeddings,
+        connection=connection_string,
+        use_jsonb=True,
     )

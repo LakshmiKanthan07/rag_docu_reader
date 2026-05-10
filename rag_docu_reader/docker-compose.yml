@@ -7,11 +7,8 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    depends_on:
-      - chroma
     volumes:
       - .:/app
-
   worker:
     build: .
     command: celery -A app.core.celery_app worker --loglevel=info
@@ -22,15 +19,5 @@ services:
     volumes:
       - .:/app
 
-  chroma:
-    image: chromadb/chroma:latest
-    ports:
-      - "8001:8000"
-    environment:
-      - IS_PERSISTENT=TRUE
-      - PERSIST_DIRECTORY=/chroma/chroma
-    volumes:
-      - chroma-data:/chroma/chroma
+# (No chroma service needed anymore as we use Supabase pgvector)
 
-volumes:
-  chroma-data:

@@ -1,0 +1,138 @@
+{
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\main.py": {
+    "mtime": 1778087004.4655218,
+    "hash": "a67269c63723113ddb3b74b52cd57701"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\__init__.py": {
+    "mtime": 1777838683.6437526,
+    "hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\main.py": {
+    "mtime": 1778087004.4553103,
+    "hash": "b58feb51f91d093fb63d76781c0376ee"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\api\\deps.py": {
+    "mtime": 1778087004.45169,
+    "hash": "1a92932e03f78bd44dc3166badc6f622"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\api\\routers\\ask.py": {
+    "mtime": 1778087004.45227,
+    "hash": "ba42108f35021bf84b63bd90fc653503"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\api\\routers\\auth.py": {
+    "mtime": 1778087004.4528835,
+    "hash": "81a52841fcf296dfcfeaa87e7e626a94"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\api\\routers\\chats.py": {
+    "mtime": 1778087004.4528835,
+    "hash": "f2c05ae82957b101058c6b3ac14732b6"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\api\\routers\\documents.py": {
+    "mtime": 1778087004.4528835,
+    "hash": "ffe106d08dadedb41f7ab8b74b6347c5"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\core\\celery_app.py": {
+    "mtime": 1778087004.4543107,
+    "hash": "cf4c82dc321466678c095cbf5ee08f79"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\core\\config.py": {
+    "mtime": 1778087004.4543107,
+    "hash": "e8863bcdb83da86e91eac8a62867d4d3"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\core\\security.py": {
+    "mtime": 1778087004.4553103,
+    "hash": "c4f56ebb5de49ca2bd4c4eace0a5ace0"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\db\\database.py": {
+    "mtime": 1777916070.6878614,
+    "hash": "682c941485ec440cc1429e1fc3436567"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\models\\chat.py": {
+    "mtime": 1778087004.4563146,
+    "hash": "53f6fa6a27f75d8d8a61714dbcdb2aa9"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\models\\document.py": {
+    "mtime": 1778087004.4573562,
+    "hash": "b86459466e5b7a54155c53db1d610bf6"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\models\\message.py": {
+    "mtime": 1778087004.4573562,
+    "hash": "653382c004efc8587961a78511f12934"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\models\\user.py": {
+    "mtime": 1778087004.4583554,
+    "hash": "67e52555df6db3b5effbc61a31374888"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\models\\__init__.py": {
+    "mtime": 1778087004.4563146,
+    "hash": "38c61fd878200113e27eb7db15c61c05"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\services\\storage.py": {
+    "mtime": 1778087004.4583554,
+    "hash": "6ec1096a3fad7aeefc4eb1d3493084df"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\services\\tasks.py": {
+    "mtime": 1778087004.4598353,
+    "hash": "50e0e8a6b0cf6be38c9c1820fe5a5d17"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\app\\services\\vectorstore.py": {
+    "mtime": 1778087004.4619098,
+    "hash": "81012c51dafd2b86cf10937d10741548"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\frontend\\app.js": {
+    "mtime": 1778169912.9578824,
+    "hash": "b3b45e6430bb16a32096ef645f17e73b"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\test\\conftest.py": {
+    "mtime": 1778184651.44641,
+    "hash": "4b80e256489df136bf61cc2eb057ff02"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\test\\test_basic.py": {
+    "mtime": 1777838683.6515756,
+    "hash": "17278743ae4a0b68ab0a008731293b45"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\test\\test_chat.py": {
+    "mtime": 1777838683.6522572,
+    "hash": "82dc2b2aa08b07c4b70212d077aff7ae"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\test\\test_upload.py": {
+    "mtime": 1777838683.6528754,
+    "hash": "5698c93f7873aa99cfcb092beb06d275"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\test\\test_vectorstore.py": {
+    "mtime": 1777838683.6549327,
+    "hash": "e363a671fcdfb873b6ad4101f52b8102"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\test\\__init__.py": {
+    "mtime": 1777838683.6500435,
+    "hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\index.html": {
+    "mtime": 1777838683.6415431,
+    "hash": "3a6f44f77cce794429346df05cb72b83"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\README.md": {
+    "mtime": 1777838683.6395023,
+    "hash": "d43166cd4d1af085ac556dd0c4c21199"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\requirements.txt": {
+    "mtime": 1777838683.6481783,
+    "hash": "d2690f7b204a532f0edadec03d6de740"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\step_to_run.txt": {
+    "mtime": 1777838683.649153,
+    "hash": "2cf8ffda38367dc06fbcf032aedbc2b8"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\docker-compose.yml": {
+    "mtime": 1778087004.4619098,
+    "hash": "28ed941cbe06c2e443b6a912890c30a8"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\requirements.txt": {
+    "mtime": 1778087004.4655218,
+    "hash": "814131cc56435af3b3c734c7136fe0a4"
+  },
+  "D:\\Priyan\\Priyan\\data science\\langchain\\rag_docu_reader\\frontend\\index.html": {
+    "mtime": 1778087004.4633822,
+    "hash": "7e0491d170d35c666c88adf6791b3c1e"
+  }
+}

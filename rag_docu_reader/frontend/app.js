@@ -137,6 +137,7 @@ async function loadChats() {
         chats.forEach(chat => {
             const li = document.createElement('li');
             li.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
+            li.dataset.id = chat.id;
             li.innerHTML = `
                 <span>${chat.title || 'New Chat'}</span>
                 <button class="delete-chat-btn" onclick="deleteChat(event, '${chat.id}')">×</button>
@@ -186,13 +187,35 @@ async function selectChat(id, title) {
     inputArea.classList.remove('hidden');
     
     // Update active class in list
-    document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
-    const activeItem = Array.from(document.querySelectorAll('.chat-item')).find(el => el.textContent.includes(title));
-    if (activeItem) activeItem.classList.add('active');
+    document.querySelectorAll('.chat-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.id === id);
+    });
     
-    // In a full implementation, you would fetch message history here.
-    messagesContainer.innerHTML = '';
+    // Fetch message history
+    messagesContainer.innerHTML = '<div class="loading-msg">Loading messages...</div>';
+    await loadMessages(id);
     loadDocuments(id);
+}
+
+// ================= MESSAGES =================
+async function loadMessages(chatId) {
+    try {
+        const res = await apiCall(`/chats/${chatId}/messages`);
+        const messages = await res.json();
+        
+        messagesContainer.innerHTML = '';
+        if (messages.length === 0) {
+            renderWelcome();
+            return;
+        }
+        
+        messages.forEach(msg => {
+            appendMessage(msg.role, msg.content);
+        });
+    } catch (err) {
+        console.error("Failed to load messages", err);
+        messagesContainer.innerHTML = `<div class="error-msg">Failed to load history: ${err.message}</div>`;
+    }
 }
 
 // ================= DOCUMENTS =================

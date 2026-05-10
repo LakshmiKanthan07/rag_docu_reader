@@ -14,7 +14,7 @@ import shutil
 import tempfile
 import pytest
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from typing import Generator, List
 
 _tmp_persist = tempfile.mkdtemp(prefix="doctalk_test_")

@@ -12,9 +12,10 @@ python-multipart
 boto3
 celery==5.4.0
 redis==5.2.1
-chromadb-client==0.6.3
+pgvector
+psycopg[binary]
+langchain-postgres
 langchain==0.3.25
-langchain-chroma==0.2.2
 langchain-groq==0.3.2
 langchain-community==0.3.21
 langchain-huggingface==0.1.2
